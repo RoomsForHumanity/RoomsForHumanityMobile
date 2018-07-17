@@ -26,6 +26,7 @@ class App extends Component {
           isFront: true };
 
   componentWillMount() {
+    
     }
 
     componentDidMount() {
