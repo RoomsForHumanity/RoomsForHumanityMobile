@@ -26,7 +26,7 @@ class App extends Component {
           isFront: true };
 
   componentWillMount() {
-    
+
     }
 
     componentDidMount() {
@@ -55,28 +55,10 @@ class App extends Component {
 
         <SignInForm />
 
-        <CardSection>
-          <Button onPress={this.getLocalStream.bind(this)}>
-            Get video
-          </Button>
-        </CardSection>
-
-        <CardSection>
-          <RTCView style={styles.rtc} streamURL={this.state.videoURL} />
-        </CardSection>
-
       </Card>
     );
   }
 }
 
-const styles = {
-  rtc: {
-    height: 640,
-    width: 320,
-    flex: 1,
-    backgroundColor: '#000'
-  }
-};
 
 export default App;

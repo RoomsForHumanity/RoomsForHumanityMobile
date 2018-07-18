@@ -25,7 +25,9 @@ class SignInForm extends Component {
             peerNumber: 0,
             peerNumberOf: { userID: 'peerNumber' },
             peers: [],
-            description: null };
+            description: null,
+            publisherNumber: 0,
+            publisherID: null };
 
             setupMediaStream() {
               const { videoURL, stream1, isFront, startStream, peerNumber } = this.state;
@@ -55,26 +57,31 @@ class SignInForm extends Component {
                       pin,
                       peerNumberOf,
                       newPeerconnection,
-                      peers } = this.state;
+                      peers,
+                      publisherNumber,
+                      publisherID } = this.state;
               console.log('subscribe()');
 
-              this.setState({ socket: io.connect(this.state.serviceAddress) });
+              // this.setState({ socket: io.connect(this.state.serviceAddress) });
 
               console.log('Connected to Stream Server');
-              console.log(this.state.serviceAddress);
-              console.log(this.state.roomName);
+              console.log(this.state.socket);
 
-              this.state.socket.emit('subsribe', this.state.userID, this.state.roomNameInput, this.state.pin);
+              // this.state.socket.emit('subscribe rooms', this.state.roomName);
+              // console.log('socket.emit subscribe rooms');
+              console.log(this.state.userID);
+              console.log(this.state.roomNameInput);
+              console.log(this.state.pin);
+
+              this.state.socket.emit('subscribe', this.state.userID, this.state.roomNameInput, this.state.pin);
               console.log('socket.emit subscribe');
-
-              this.state.socket.emit('subscribe rooms', this.state.roomName);
-              console.log('socket.emit subscribe rooms');
 
               // When it receives a subscriber ready message, add user to peers
               this.state.socket.on('subscriber ready', (clientID) => {
-                console.log('Subscriber ready from: ', clientID);
+                console.log('Subscriber ready from: ');
+                console.log(clientID);
                 this.setState({ clientID });
-              });
+
 
               if (!this.state.peerNumberOf.hasOwnProperty(this.state.clientID)) {
                 //If this clientID isn't on record yet, create a new PC and add it to record
@@ -89,49 +96,98 @@ class SignInForm extends Component {
                               peerConnection: this.state.newPeerconnection,
                               setAndSentDescription: false });
                   this.setState({ peers: list });
-
-                  const clientID = this.state.clientID;
+                  console.log('List: ');
+                  console.log(list);
 
                   let peerNumberOf = this.state.peerNumberOf;
                   peerNumberOf[clientID] = list.length - 1;
                   this.setState({ peerNumberOf });
                   this.setState({ peerNumber: peerNumberOf[clientID]});
 
-                  this.joinRoom();
-                } else { //If client is on record
+                  this.joinRoom(); //peerNumber
+
+                } else {
+                  //If client is on record
+                  const peerNumberOfHelper = this.state.peerNumberOf;
+                  const clientIDHelper = this.state.clientID;
                   console.log('Already connected to this peer. Initialzing stream');
 
-                  const peerNumberOf = this.state.peerNumberOf;
-                  const clientID = this.state.clientID;
-                  const peerNumber = peerNumberOf[clientID];
+
+                  const peerNumber = peerNumberOfHelper[clientIDHelper];
                   this.setState({ peerNumber });
 
                   this.joinRoom();
                 }
                 }
+                });
+
+              this.state.socket.on('publisher ready', (publisherID, publisherNumber) => {
+                this.setState({ publisherID });
+                this.setState({ publisherNumber });
+                console.log('publisherID: ');
+                console.log(publisherID);
+
+                if (this.state.userID !== publisherID ) {
+                  let list = this.state.peers;
+                  list.push({ userID: publisherID,
+                              number: (list.length),
+                              peerConnection: this.state.newPeerconnection,
+                              publisherNumber });
+                  this.setState({ peers: list });
+
+                  let peerNumberOfHelper = this.state.peerNumberOf;
+                  peerNumberOfHelper[publisherID] = list.length - 1;
+                  this.setState({ peerNumberOf });
+                  this.setState({ peerNumber: peerNumberOf[publisherID] });
+                } else {
+
+                  const list = this.state.peers;
+                  const peerNumberOfHelper = this.state.peerNumberOf;
+                  list[peerNumberOfHelper[publisherID]].publisherNumber = publisherNumber;
+                  this.setState({ peers: list });
+
+                  list[peerNumberOfHelper[publisherID]].peerConnection.onaddstream((event) => {
+                    console.log('Received remote stream');
+                    // View video!
+                  });
+                }
+              });
+
               }
 
             shareStream() {
-              const { stream1, startStream, peerNumber, localStreams, peers, description } = this.state;
+              const { stream1, startStream, peerNumber, localStreams, peers, description, newPeerConnection } = this.state;
               console.log('shareStream()')
 
+              console.log('this.state.localStream:');
+              console.log(this.state.localStreams);
               let localStreamsHelper = this.state.localStreams;
+              console.log('This.state.localStreamsHelper');
+              console.log(localStreamsHelper);
+              console.log('this.state.peerNumber');
+              console.log(this.state.peerNumber);
+              console.log('this.state.stream1');
+              console.log(this.state.stream1);
               localStreamsHelper[this.state.peerNumber] = this.state.stream1;
+              console.log('localStreamsHelper');
+              console.log(localStreamsHelper);
               this.setState({ localStreams: localStreamsHelper });
+              console.log(this.state.localStreams);
 
               const peersHelper = this.state.peers;
               const peerNumberHelper = this.state.peerNumber;
+              console.log(this.state.newPeerConnection);
 
-              peersHelper[peerNumberHelper].peerConnection.addStream(localStreamsHelper[peerNumberHelper]);
+              this.state.newPeerConnection.addStream(this.state.stream1);
 
-              peersHelper[peerNumberHelper].peerConnection.createOffer().then((description) => {
+              this.state.newPeerConnection.createOffer().then((description) => {
                 this.setState({ description });
                 this.setAndSendDescription(); // description, peerNumber
-              }).catch(this.errorHandler());
+              });
             }
 
             setAndSendDescription() {
-              const { peers, peerNumber, description, socket, userID, roomNameInput } = this.state;
+              const { peers, peerNumber, description, socket, userID, roomNameInput, newPeerConnection } = this.state;
 
               const peersHelper = this.state.peers;
               const peerNumberHelper = this.state.peerNumber;
@@ -139,27 +195,30 @@ class SignInForm extends Component {
 
               const signalHelper = {
                 type: 'sdp',
-                sdp: peersHelper[peerNumberHelper].peerConnection.localDescription,
-                userID: this.state.userID }
+                sdp: this.state.newPeerConnection.localDescription,
+                userID: this.state.userID };
 
-              peersHelper[peerNumberHelper].peerConnection.setLocalDescription(description).then(() => {
-                this.state.socket.emit('signal', signalHelper, peersHelper[peerNumberHelper].userID, this.state.roomNameInput);
-              }).catch(this.errorHandler());
+              this.state.newPeerConnection.setLocalDescription(description).then(() => {
+                this.state.socket.emit('signal', signalHelper, this.state.userID, this.state.roomNameInput);
+              });
             }
 
             publish() {
-              const { startStream, socket } = this.state;
-              this.setState({ startStream: false });
+              const { startStream, socket, userID, roomNameInput, pin } = this.state;
+              this.setState({ startStream: true });
               this.setupMediaStream();
-              socket.emit('publish rooms', this.state.roomName);
-              socket.on('publish response', (roomExists, passcode) => {
-                if (!roomExists) {
-                  //Enter pin to protect room
-                }
-                else {
-                  // pin = passcode
-                }
-              });
+
+              this.state.socket.emit('publish', this.state.userID, this.state.roomNameInput, this.state.pin);
+              console.log('publish');
+              // socket.emit('publish rooms', this.state.roomName);
+              // socket.on('publish response', (roomExists, passcode) => {
+              //   if (!roomExists) {
+              //     //Enter pin to protect room
+              //   }
+              //   else {
+              //     // pin = passcode
+              //   }
+              // });
             }
 
             setUpService() {
@@ -186,7 +245,7 @@ class SignInForm extends Component {
             }
 
             createPeerConnection() {
-              const { clientID, newPeerConnection, socket, roomNameInput, userID } = this.state;
+              const { clientID, newPeerConnection, socket, roomNameInput, userID, publisherNumber } = this.state;
               const configOptions = { iceServers: [
                         { url: 'stun:stun.l.google.com:19302' },
                         { url: 'turn:numb.viagenie.ca',
@@ -202,7 +261,7 @@ class SignInForm extends Component {
               pc.onicecandidate = (event) => {
                 console.log('onicecandidate');
                 if (event.candidate != null) {
-                  socket.emit('signal',
+                  this.socket.emit('signal',
                           { type: 'ice', ice: event.candidate, userID: this.state.userID },
                           this.state.peerUserID,
                           this.state.roomNameInput);
@@ -249,6 +308,7 @@ class SignInForm extends Component {
     return Math.floor((1 + Math.random()) * 0x10000).toString(16).substring(1);
   }
 
+
   render() {
     return (
       <Card>
@@ -268,11 +328,30 @@ class SignInForm extends Component {
           </Button>
         </CardSection>
 
+        <CardSection>
+          <Button onPress={this.publish.bind(this)}>
+            Publish
+          </Button>
+        </CardSection>
+
+        <CardSection>
+          <RTCView style={styles.rtc} streamURL={this.state.videoURL} />
+        </CardSection>
+
+
 
       </Card>
     );
   }
 }
 
+const styles = {
+  rtc: {
+    height: 640,
+    width: 320,
+    flex: 1,
+    backgroundColor: '#000'
+  }
+};
 
 export default SignInForm;
