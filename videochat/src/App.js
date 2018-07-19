@@ -29,7 +29,7 @@ let localStream;
 
 let peers = [];
 let peerNumberOf = {
-  'userID': 'peerNumber'
+  userID: 'peerNumber'
 };
 
 let numPublishers = 0;
@@ -41,7 +41,7 @@ let streamEng = {
   shouldScreenshare: false
 }
 
-let pin = '';
+let pin = null;
 let user = { userID: '' };
 
 let videoIndices = [];
@@ -49,6 +49,8 @@ let activeVideos = [];
 
 let videoSourceId;
 let videoURL;
+
+let peerConnection1;
 
 function uuid() {
   // Function to generate userID
@@ -61,8 +63,9 @@ function s4() {
 }
 
 streamEng.setUpService = () => {
+  console.log('setUpService');
+
   streamEng.subscribe();
-  user.userID = uuid();
 };
 
 streamEng.subscribe = () => {
@@ -77,8 +80,10 @@ streamEng.subscribe = () => {
       pin = passcode;
     }
 
-    streamEng.socket.emit('subscribe', user.userID, roomName, pin);
+  console.log('subscribe rooms/response');
 
+    streamEng.socket.emit('subscribe', user.userID, roomName, pin);
+    console.log(user.userID);
     streamEng.socket.on('subscriber ready', (clientID) => {
       console.log('Subscriber ready from', clientID);
 
@@ -93,9 +98,17 @@ streamEng.subscribe = () => {
             peerConnection: newPeerConnection,
             setAndSetDescription: false
           });
+
+          console.log(peers.length);
           peerNumberOf[clientID] = peers.length - 1;
         }
 
+        peers.map((userID) => {
+          console.log(userID);
+          return userID;
+        });
+
+        console.log('peerNumberOf[clientID]', peerNumberOf[clientID]); // other person's peer #
         joinRoom(peerNumberOf[clientID]);
       } else {
         console.log('Already connected to this peer. Initiating stream');
@@ -159,6 +172,7 @@ streamEng.onAddNewPublisher = (videoIndex) => {
     videoIndices.push(videoIndex);
     activeVideos.push(videoSourceId);
   }
+  console.log('Displayed video:', videoIndex)
 };
 
 streamEng.onPublish = (stream) => {
@@ -167,11 +181,12 @@ streamEng.onPublish = (stream) => {
     activeVideos.push(videoURL);
   }
   isPublished = true;
-
 };
 
 function gotMessageFromServer(message) {
+  console.log('gotMessageFromServer');
   const signal = message;
+  console.log(signal);
   let peerNumber = -1;
 
   //Ignore message from ourself
@@ -179,13 +194,14 @@ function gotMessageFromServer(message) {
     console.log('Received from self');
     return;
   }
+  console.log('peerNumberOf[signal.userID]', peerNumberOf[signal.userID]);
   peerNumber = peerNumberOf[signal.userID];
 
   if (peers[peerNumber].userID === signal.userID) {
     if (signal.type === 'sdp') {
       console.log('Got offer');
       peers[peerNumber].peerConnection.createAnswer().then((description) => {
-        setAndSendDescription(description, peerNumber);
+        setAndSetDescription(description, peerNumber);
       });
     } else {
       console.log('Got answer');
@@ -197,6 +213,7 @@ function gotMessageFromServer(message) {
 
 function setupMediaStream(startStream, peerNumber) {
   const isFront = true;
+  console.log('peerNumber', peerNumber);
 
   if (localStream !== undefined) {
     console.log('Reusing stream');
@@ -226,6 +243,7 @@ function setupMediaStream(startStream, peerNumber) {
     }, (stream) => {
       console.log('Setting up stream');
       localStream = stream;
+      console.log(stream);
       videoURL = stream.toURL();
       this.setState({ videoURL: stream.toURL() });
       shareStream(stream, startStream, peerNumber);
@@ -235,6 +253,8 @@ function setupMediaStream(startStream, peerNumber) {
 }
 
 function joinRoom(peerNumber) {
+  console.log('joinRoom');
+  console.log('peerNumber', peerNumber);
   try {
     setupMediaStream(true, peerNumber);
   } catch (err) {
@@ -244,28 +264,38 @@ function joinRoom(peerNumber) {
 
 
 function shareStream(stream, startStream, peerNumber) {
+  console.log('shareStream');
+  console.log('startStream', startStream);
+  console.log('Peer Number: ', peerNumber);
   localStreams[peerNumber] = stream;
 
   if (startStream === false) {
     streamEng.onPublish(stream);
-  }
-  else {
+  } else {
     console.log('NOT ON PUBLISH');
     if (!peers[peerNumber]) {
       console.log('NOPE: ', peerNumber);
     }
-    peers[peerNumber].peerConnection.addStream(localStreams[peerNumber]);
-    peers[peerNumber].peerConnection.createOffer().then((description) => {
-      setAndSetDescription(description, peerNumber);
+    // peers[peerNumber].peerConnection.addStream(localStreams[peerNumber]);
+    peerConnection1.addStream(localStreams[peerNumber]);
+    console.log('addStream');
+
+    peerConnection1.createOffer().then((description) => {
+        setAndSetDescription(description, peerNumber);
     });
+    // peers[peerNumber].peerConnection.createOffer().then((description) => {
+    //   setAndSetDescription(description, peerNumber);
+    // });
   }
 }
 
 function createPeerConnection(peerUserID, publisherNumber) {
+  console.log('createPeerConnection');
   const newPeerConnection = new RTCPeerConnection(configOptions);
+  peerConnection1 = newPeerConnection;
 
   newPeerConnection.onicecandidate = (event) => {
-    console.log('onicecandidate')
+    console.log('onicecandidate');
     if (event.candidate !== null) {
       streamEng.socket.emit('signal', { type: 'ice', ice: event.candidate, userID: user.userID }, peerUserID, roomName);
     }
@@ -283,6 +313,7 @@ function createPeerConnection(peerUserID, publisherNumber) {
 }
 
 function setAndSetDescription(description, peerNumber) {
+  console.log('setAndSetDescription');
   peers[peerNumber].peerConnection.setLocalDescription(description).then(() => {
     streamEng.socket.emit('signal', {
       type: 'sdp',
@@ -300,12 +331,15 @@ class App extends Component {
     }
 
   componentDidMount() {
+    const userID = uuid();
+    user.userID = userID;
     }
 
 
     onGoToChat() {
       const { roomNameInput, videoURL } = this.state;
-      roomName = this.state.roomNameInput;
+      roomName = '#' + this.state.roomNameInput;
+      console.log(roomName);
       console.log('Attempting to create a room');
       socket.emit('query rooms', '#' + this.state.roomNameInput);
       socket.on('query response', (exists, pin) => {
@@ -334,18 +368,17 @@ class App extends Component {
       },
       (stream) => {
         this.setState({ videoURL: stream.toURL() });
+        console.log(stream);
         localStream = stream;
       },
         err => console.error(err)
       );
     }
 
-    publish() {
-      setupMediaStream(false);
-
-      socket.emit('publish', user.userID, roomName, pin);
-        console.log('publish');
-      }
+  publish() {
+    socket.emit('publish', user.userID, roomName, pin);
+      console.log('publish');
+    }
 
   render() {
     return (
@@ -369,14 +402,14 @@ class App extends Component {
         </CardSection>
 
         <CardSection>
-          <Button onPress={this.publish.bind(this)}>
-            Publish
+          <Button onPress={this.getLocalStream.bind(this)}>
+            Get Video
           </Button>
         </CardSection>
 
         <CardSection>
-          <Button onPress={this.getLocalStream.bind(this)}>
-            Get Video
+          <Button onPress={this.publish.bind(this)}>
+            Join Chat
           </Button>
         </CardSection>
 
