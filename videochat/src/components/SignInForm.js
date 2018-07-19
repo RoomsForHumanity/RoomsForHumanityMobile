@@ -1,5 +1,5 @@
 import React, { Component } from 'react';
-import { View } from 'react-native';
+import { Platform } from 'react-native';
 import { CardSection, Card, Input, Button } from './common';
 import {
   RTCPeerConnection,
@@ -27,16 +27,33 @@ class SignInForm extends Component {
             peers: [],
             description: null,
             publisherNumber: 0,
-            publisherID: null };
+            publisherID: null,
+            message: null };
 
             setupMediaStream() {
               const { videoURL, stream1, isFront, startStream, peerNumber } = this.state;
+
+              let videoSourceId;
+              // on android, you don't have to specify sourceId manually, just use facingMode
+              if (Platform.OS === 'ios') {
+                MediaStreamTrack.getSources((sourceInfos) => {
+                  console.log('sourceInfos: ', sourceInfos);
+
+                  for (let i = 0; i < sourceInfos.length; i++) {
+                    const sourceInfo = sourceInfos[i];
+                    if (sourceInfo.kind === 'video' && sourceInfo.facing === (isFront ? 'front' : 'back')) {
+                      videoSourceId = sourceInfo.id
+                    }
+                  }
+                });
+              }
               getUserMedia(
                 {
                 audio: true,
                 video: {
                   mandatory: {},
                   facingMode: isFront ? 'user' : 'environment',
+                  optional: (videoSourceId ? [{ sourceId: videoSourceId }] : []),
                 }
               },
               (stream) => {
@@ -59,7 +76,8 @@ class SignInForm extends Component {
                       newPeerconnection,
                       peers,
                       publisherNumber,
-                      publisherID } = this.state;
+                      publisherID,
+                      message } = this.state;
               console.log('subscribe()');
 
               // this.setState({ socket: io.connect(this.state.serviceAddress) });
@@ -105,7 +123,6 @@ class SignInForm extends Component {
                   this.setState({ peerNumber: peerNumberOf[clientID]});
 
                   this.joinRoom(); //peerNumber
-
                 } else {
                   //If client is on record
                   const peerNumberOfHelper = this.state.peerNumberOf;
@@ -126,21 +143,26 @@ class SignInForm extends Component {
                 this.setState({ publisherNumber });
                 console.log('publisherID: ');
                 console.log(publisherID);
+                console.log('Publisher ready from: ');
+                console.log(this.state.publisherNumber);
 
-                if (this.state.userID !== publisherID ) {
-                  let list = this.state.peers;
+                // If the peer doesn't exist, create a new PC and add it to list of peers
+                // If it does exist, reset the publisher number and the on addstream function
+                // so that the peer number is correct.
+                if (this.state.userID !== publisherID) {
+                  const list = this.state.peers;
                   list.push({ userID: publisherID,
                               number: (list.length),
                               peerConnection: this.state.newPeerconnection,
                               publisherNumber });
                   this.setState({ peers: list });
 
-                  let peerNumberOfHelper = this.state.peerNumberOf;
+                  const peerNumberOfHelper = this.state.peerNumberOf;
                   peerNumberOfHelper[publisherID] = list.length - 1;
-                  this.setState({ peerNumberOf });
-                  this.setState({ peerNumber: peerNumberOf[publisherID] });
-                } else {
 
+                  this.setState({ peerNumberOf });
+                  this.setState({ peerNumber: list.length - 1 });
+                } else {
                   const list = this.state.peers;
                   const peerNumberOfHelper = this.state.peerNumberOf;
                   list[peerNumberOfHelper[publisherID]].publisherNumber = publisherNumber;
@@ -148,11 +170,33 @@ class SignInForm extends Component {
 
                   list[peerNumberOfHelper[publisherID]].peerConnection.onaddstream((event) => {
                     console.log('Received remote stream');
-                    // View video!
+                    // View video
+                    console.log('Adding stream to: ');
+                    console.log(list[peerNumberOfHelper[publisherID]].publisherNumber);
+                    console.log('for peer: ');
+                    console.log(publisherID);
                   });
                 }
+
+                // this.onAddNewPublisher(); // publisherNumber
               });
 
+              this.state.socket.on('signal', (message) => {
+                this.gotMessageFromServer(); // message
+              });
+
+              this.state.socket.on('disconnect user', (userID, roomName) => {
+                const peerNumberOfHelper = this.state.peerNumberOf;
+                if (peerNumberOfHelper.hasOwnProperty(userID)) {
+                  const list = this.state.peers;
+                  this.setState({ peerNumber: peerNumberOf[userID] });
+                  if (list[this.state.peerNumber].hasOwnProperty('publisherNumber')) {
+                    //onDeletePublisher
+                  }
+                  list.splice(this.state.peerNumber, 1);
+                  this.setState({ peers: list });
+                }
+              });
               }
 
             shareStream() {
@@ -261,7 +305,7 @@ class SignInForm extends Component {
               pc.onicecandidate = (event) => {
                 console.log('onicecandidate');
                 if (event.candidate != null) {
-                  this.socket.emit('signal',
+                  this.state.socket.emit('signal',
                           { type: 'ice', ice: event.candidate, userID: this.state.userID },
                           this.state.peerUserID,
                           this.state.roomNameInput);
@@ -271,11 +315,48 @@ class SignInForm extends Component {
               if (this.state.publisherNumber !== null) {
                 pc.onaddstream = (event) => {
                   console.log('Received remote stream: ', event.stream);
+                  console.log('Adding stream to ', this.state.publisherNumber);
+
                 };
               }
               console.log('Returning peer connection');
               return pc;
             }
+
+  gotMessageFromServer() {
+    const { message, userID, peerNumberOf, peers, peerNumber, description } = this.state;
+    const signal = this.state.message;
+    let peerNumberHelper = -1;
+    const peerNumberOfHelper = this.state.peerNumberOf;
+    const list = this.state.peers;
+
+    if (signal.userID === this.state.userID) {
+      console.log('Received from self');
+      return;
+    }
+
+    peerNumberHelper = peerNumberHelper[signal.userID];
+    this.setState({ peerNumber: peerNumberHelper });
+
+    if (list[peerNumberHelper].userID === signal.userID) {
+      if (signal.type === 'sdp') {
+        list[peerNumberHelper].peerConnection.setRemoteDescription(new RTCSessionDescription(signal.sdp)).then( () => {
+          //Only create answers in respnse to offers
+          if (signal.sdp.type === 'offer') {
+            console.log('Got offer');
+            list[peerNumberHelper].peerConnection.createAnswer().then( (description) => {
+              this.setState({ description });
+              this.setAndSendDescription(); // description, peerNumber
+            });
+          } else {
+            console.lot('Got answer');
+          }
+        });
+      } else if (signal.type === 'ice') {
+        list[peerNumber].peerConnection.addIceCandidate(new RTCIceCandidate(signal.ice));
+      }
+    }
+  }
 
   onGoToChat() {
     const { roomNameInput, socket, serviceAddress } = this.state;
