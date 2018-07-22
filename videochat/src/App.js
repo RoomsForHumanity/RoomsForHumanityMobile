@@ -83,6 +83,7 @@ streamEng.subscribe = () => {
   console.log('subscribe rooms/response');
 
     streamEng.socket.emit('subscribe', user.userID, roomName, pin);
+    console.log('My userID');
     console.log(user.userID);
     streamEng.socket.on('subscriber ready', (clientID) => {
       console.log('Subscriber ready from', clientID);
@@ -90,6 +91,7 @@ streamEng.subscribe = () => {
       if (!peerNumberOf.hasOwnProperty(clientID)) {
         // If this clientID isn't on record yet, create a new PC and add it to record
           // Then join room
+          console.log('length of peers array before:', peers.length);
         if (user.userID !== clientID) {
           const newPeerConnection = createPeerConnection(clientID);
           peers.push({
@@ -99,8 +101,12 @@ streamEng.subscribe = () => {
             setAndSetDescription: false
           });
 
-          console.log(peers.length);
+          console.log('length of peers array after: ', peers.length);
+          console.log('minus 1', peers.length - 1);
           peerNumberOf[clientID] = peers.length - 1;
+          console.log(peerNumberOf[clientID]);
+
+          joinRoom(peerNumberOf[clientID]);
         }
 
         peers.map((userID) => {
@@ -109,19 +115,20 @@ streamEng.subscribe = () => {
         });
 
         console.log('peerNumberOf[clientID]', peerNumberOf[clientID]); // other person's peer #
-        joinRoom(peerNumberOf[clientID]);
+        joinRoom(peers.length);
       } else {
         console.log('Already connected to this peer. Initiating stream');
 
-        let peerNumber = peerNumberOf[clientID];
+        const peerNumber = peerNumberOf[clientID];
         joinRoom(peerNumberOf[clientID]);
       }
     });
 
     streamEng.socket.on('publisher ready', (publisherID, publisherNumber) => {
       console.log('Publisher ready from:', publisherNumber);
+      console.log('PublisherID', publisherID);
 
-      if (!peerNumberOf.hasOwnProperty(publisherID)){
+      if (!peerNumberOf.hasOwnProperty(publisherID)) {
         if (user.userID !== publisherID) {
           const newPeerConnection = createPeerConnection(publisherID, publisherNumber);
           peers.push({
@@ -188,6 +195,7 @@ function gotMessageFromServer(message) {
   const signal = message;
   console.log(signal);
   let peerNumber = -1;
+  console.log('signal.userID', signal.userID);
 
   //Ignore message from ourself
   if (signal.userID === user.userID) {
@@ -213,7 +221,7 @@ function gotMessageFromServer(message) {
 
 function setupMediaStream(startStream, peerNumber) {
   const isFront = true;
-  console.log('peerNumber', peerNumber);
+  console.log('peerNumber setUpMediaStream', peerNumber);
 
   if (localStream !== undefined) {
     console.log('Reusing stream');
@@ -236,7 +244,11 @@ function setupMediaStream(startStream, peerNumber) {
       {
       audio: true,
       video: {
-        mandatory: {},
+        mandatory: {
+          minWidth: 640,
+          minHeight: 360,
+          minFrameRate: 30,
+        },
         facingMode: isFront ? 'user' : 'environment',
         optional: (videoSourceId ? [{ sourceId: videoSourceId }] : []),
       }
@@ -254,7 +266,7 @@ function setupMediaStream(startStream, peerNumber) {
 
 function joinRoom(peerNumber) {
   console.log('joinRoom');
-  console.log('peerNumber', peerNumber);
+  console.log('peerNumber joinRoom', peerNumber);
   try {
     setupMediaStream(true, peerNumber);
   } catch (err) {
@@ -266,7 +278,8 @@ function joinRoom(peerNumber) {
 function shareStream(stream, startStream, peerNumber) {
   console.log('shareStream');
   console.log('startStream', startStream);
-  console.log('Peer Number: ', peerNumber);
+  console.log('Peer Number shareStream: ', peerNumber);
+  console.log('stream: ', stream);
   localStreams[peerNumber] = stream;
 
   if (startStream === false) {
@@ -277,7 +290,8 @@ function shareStream(stream, startStream, peerNumber) {
       console.log('NOPE: ', peerNumber);
     }
     // peers[peerNumber].peerConnection.addStream(localStreams[peerNumber]);
-    peerConnection1.addStream(localStreams[peerNumber]);
+    // peerConnection1.addStream(localStreams[peerNumber]);
+    peerConnection1.addStream(localStream);
     console.log('addStream');
 
     peerConnection1.createOffer().then((description) => {
@@ -362,7 +376,11 @@ class App extends Component {
       getUserMedia({
         audio: true,
         video: {
-          mandatory: {},
+          mandatory: {
+            minWidth: 640,
+            minHeight: 360,
+            minFrameRate: 30,
+          },
           facingMode: isFront ? 'user' : 'environment',
         }
       },
