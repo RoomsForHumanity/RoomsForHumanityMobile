@@ -42,7 +42,7 @@ let streamEng = {
 }
 
 let pin = null;
-let user = { userID: '' };
+let user = {};
 
 let videoIndices = [];
 let activeVideos = [];
@@ -83,10 +83,12 @@ streamEng.subscribe = () => {
   console.log('subscribe rooms/response');
 
     streamEng.socket.emit('subscribe', user.userID, roomName, pin);
+    user.isPublished = true;
     console.log('My userID');
     console.log(user.userID);
-    streamEng.socket.on('subscriber ready', (clientID) => {
+    streamEng.socket.on('subscriber ready', (clientID, clientNumber) => {
       console.log('Subscriber ready from', clientID);
+      console.log('clientNumber', clientNumber);
 
       if (!peerNumberOf.hasOwnProperty(clientID)) {
         // If this clientID isn't on record yet, create a new PC and add it to record
@@ -98,11 +100,12 @@ streamEng.subscribe = () => {
             userID: clientID,
             number: (peers.length),
             peerConnection: newPeerConnection,
-            setAndSetDescription: false
+            setAndSendDescription: false
           });
 
           console.log('length of peers array after: ', peers.length);
           console.log('minus 1', peers.length - 1);
+
           peerNumberOf[clientID] = peers.length - 1;
           console.log(peerNumberOf[clientID]);
 
@@ -114,8 +117,10 @@ streamEng.subscribe = () => {
           return userID;
         });
 
-        console.log('peerNumberOf[clientID]', peerNumberOf[clientID]); // other person's peer #
-        joinRoom(peers.length);
+        peerNumberOf[clientID] = clientNumber;
+        console.log('peerNumberOf[clientID]', peerNumberOf[clientID]);
+
+        joinRoom(peerNumberOf[clientID]);
       } else {
         console.log('Already connected to this peer. Initiating stream');
 
@@ -141,8 +146,9 @@ streamEng.subscribe = () => {
           peerNumberOf[publisherID] = peers.length - 1;
         }
       } else {
-        peers[peerNumberOf[publisherID]].publisherNumber = publisherNumber;
-        peers[peerNumberOf[publisherID]].peerConnection.onaddstream = (event) => {
+        // peers[peerNumberOf[publisherID]].publisherNumber = publisherNumber;
+        // peers[peerNumberOf[publisherID]].peerConnection
+        peerConnection1.onaddstream = (event) => {
           console.log('Received remote stream');
           console.log('Adding stream to:', peers[peerNumberOf[publisherID]].publisherNumber);
           console.log('for peer:', publisherID);
@@ -175,6 +181,7 @@ streamEng.subscribe = () => {
 };
 
 streamEng.onAddNewPublisher = (videoIndex) => {
+  console.log('onAddNewPublisher videoIndex:', videoIndex);
   if (!videoIndices.includes(videoIndex)) {
     videoIndices.push(videoIndex);
     activeVideos.push(videoSourceId);
@@ -197,6 +204,7 @@ function gotMessageFromServer(message) {
   let peerNumber = -1;
   console.log('signal.userID', signal.userID);
 
+
   //Ignore message from ourself
   if (signal.userID === user.userID) {
     console.log('Received from self');
@@ -209,7 +217,7 @@ function gotMessageFromServer(message) {
     if (signal.type === 'sdp') {
       console.log('Got offer');
       peers[peerNumber].peerConnection.createAnswer().then((description) => {
-        setAndSetDescription(description, peerNumber);
+        setAndSendDescription(description, peerNumber);
       });
     } else {
       console.log('Got answer');
@@ -292,20 +300,24 @@ function shareStream(stream, startStream, peerNumber) {
     // peers[peerNumber].peerConnection.addStream(localStreams[peerNumber]);
     // peerConnection1.addStream(localStreams[peerNumber]);
     peerConnection1.addStream(localStream);
+
+    console.log('localStream')
     console.log('addStream');
 
+    // peers[peerNumber].peerConnection
     peerConnection1.createOffer().then((description) => {
-        setAndSetDescription(description, peerNumber);
+        setAndSendDescription(description, peerNumber);
     });
     // peers[peerNumber].peerConnection.createOffer().then((description) => {
-    //   setAndSetDescription(description, peerNumber);
+    //   setAndSendDescription(description, peerNumber);
     // });
   }
 }
 
 function createPeerConnection(peerUserID, publisherNumber) {
-  console.log('createPeerConnection');
+  console.log('createPeerConnection: peerUserID', peerUserID);
   const newPeerConnection = new RTCPeerConnection(configOptions);
+
   peerConnection1 = newPeerConnection;
 
   newPeerConnection.onicecandidate = (event) => {
@@ -315,19 +327,24 @@ function createPeerConnection(peerUserID, publisherNumber) {
     }
   };
 
-  if (publisherNumber !== null) {
+  // if (publisherNumber !== null) {
     newPeerConnection.onaddstream = (event) => {
       console.log('Received remote stream: ', event.stream);
       console.log('Adding stream to: ', publisherNumber);
       peers[peerNumberOf[peerUserID]].hasConnected = true;
-    };
-  }
+    // };
+  };
+
+  newPeerConnection.addStream(localStream);
 
   return newPeerConnection;
 }
 
-function setAndSetDescription(description, peerNumber) {
-  console.log('setAndSetDescription');
+function setAndSendDescription(description, peerNumber) {
+  console.log('setAndSendDescription');
+  console.log('peerNumber: setAndSendDescription', peerNumber);
+  console.log('peers[peerNumber]', peers[peerNumber]);
+  console.log('peers[peerNumber].userID', peers[peerNumber].userID);
   peers[peerNumber].peerConnection.setLocalDescription(description).then(() => {
     streamEng.socket.emit('signal', {
       type: 'sdp',
@@ -345,8 +362,7 @@ class App extends Component {
     }
 
   componentDidMount() {
-    const userID = uuid();
-    user.userID = userID;
+    user.userID = uuid();
     }
 
 
